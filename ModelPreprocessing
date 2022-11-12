@@ -1,0 +1,330 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+"""
+import numpy as np
+import pandas as pd
+import datetime
+from datetime import datetime, timedelta, date
+from statistics import mean
+
+def conv(val):
+    if not val:
+        return 0    
+    try:
+        return np.float64(val)
+    except:        
+        return np.float64(0)
+    
+print('Going to load the files...')
+raw_csv_file = '/Documents/ZuckerAI/Experiences_Report.8.9.2021.csv'
+scores_csv_file = '/Documents/ZuckerAI/Main_Data_Export.8.9.2021.csv'
+school_data= '/Documents/ZuckerAI/SchoolWeights.csv'
+schools = pd.read_csv(school_data)
+raw_data = pd.read_csv(raw_csv_file)
+scores_data = pd.read_csv(scores_csv_file, converters= {'CUM_BCPM_GPA':conv, 'CUM_TOTAL_GPA':conv}, dtype={"CUM_BCPM_GPA": int, "CUM_TOTAL_GPA": int})
+
+print('Finished reading files')
+
+## check lengths
+#print(f'Raw data set\n rows: {len(raw_data)}\n headers: {raw_data.columns}\n')
+#print(f'Scores data set\n rows: {len(scores_data)}\n headers: {scores_data.columns}\n')    
+
+# create new dataframe
+df = pd.DataFrame()
+df['amp_id'] = scores_data['AMP ID']
+df['app_year'] = scores_data['App Year']
+
+# count by app year
+#print(df[df.app_year == 2015].count())
+
+# rename column to join
+raw_data = raw_data.rename(columns={"AMP ID": "amp_id"})
+merged_df = pd.merge(df, raw_data, how='left', on=['amp_id'])
+
+# volunteer hours
+volunteer_hours = merged_df[np.char.count(merged_df['Experience Type'].astype('|S'), b'Volunteer') > 0].groupby(['amp_id']).sum()['Total Hours']
+volunteer_hours.name = 'volunteer_hours'
+# shadowing hours
+shadowing_hours = merged_df[np.char.count(merged_df['Experience Type'].astype('|S'), b'Physician Shadowing/Clinical Observation') > 0].groupby(['amp_id']).sum()['Total Hours']
+shadowing_hours.name = 'shadowing_hours'
+# research hours, publication count
+research_hours = merged_df[merged_df['Experience Type'] == 'Research/Lab'].groupby(['amp_id']).sum()['Total Hours']
+research_hours.name = 'research_hours'
+publication_count = merged_df[merged_df['Experience Type'] == 'Publications'].groupby(['amp_id']).count()['app_year']
+publication_count.name = 'publication_count'
+presentation_count = merged_df[merged_df['Experience Type'] == 'Presentations/Posters'].groupby(['amp_id']).count()['app_year']
+presentation_count.name = 'presentation_count'
+# leadership ('Extracurricular Activities', 'Leadership - Not Listed Elsewhere')
+leadership_hours = merged_df[np.logical_or(merged_df['Experience Type']=='Extracurricular Activities', merged_df['Experience Type']=='Leadership - Not Listed Elsewhere')].groupby(['amp_id']).sum()['Total Hours']
+leadership_hours.name = 'leadership_hours'
+
+# join total hour counts
+df = pd.merge(df, volunteer_hours, how='left', on=['amp_id'])
+df = pd.merge(df, research_hours, how='left', on=['amp_id'])
+df = pd.merge(df, publication_count, how='left', on=['amp_id'])
+df = pd.merge(df, presentation_count, how='left', on=['amp_id'])
+df = pd.merge(df, leadership_hours, how='left', on=['amp_id'])
+df = pd.merge(df, shadowing_hours, how='left', on=['amp_id'])
+
+# replace Na values
+df['volunteer_hours'].fillna(0, inplace=True)
+df['shadowing_hours'].fillna(0, inplace=True)
+df['research_hours'].fillna(0, inplace=True)
+df['publication_count'].fillna(0, inplace=True)
+df['leadership_hours'].fillna(0, inplace=True)
+df['presentation_count'].fillna(0, inplace=True)
+
+### Special Features
+raw_data['Experience Name'].fillna(' ', inplace=True)
+raw_data['Experience Type'].fillna(' ', inplace=True)
+
+#varsity_list = []
+#TFA_list = []
+#PeaceCorps_list = []
+#Rhodes_list = []
+#Fulbright_list = []
+#
+#for i in raw_data.index:
+#    if 'Varsity' in raw_data["Experience Name"][i] and 'Intercollegiate Athletics' in raw_data["Experience Type"][i]:
+#        varsity_list.append(raw_data['amp_id'][i])
+#    elif 'Teach for America' in raw_data["Experience Name"][i]:
+#        TFA_list.append(raw_data["amp_id"][i])
+#    elif 'Peace Corps' in raw_data["Experience Name"][i]:
+#        PeaceCorps_list.append(raw_data["amp_id"][i])
+#    elif 'Rhodes Scholarship' in raw_data["Experience Name"][i] and 'Finalist' not in raw_data["Experience Name"][i]:
+#        Rhodes_list.append(raw_data["amp_id"][i])
+#    elif 'Fulbright' in raw_data["Experience Name"][i] and 'Alternate' not in raw_data["Experience Name"][i] and 'Finalist' not in raw_data["Experience Name"][i]:
+#        Fulbright_list.append(raw_data["amp_id"][i])
+#    else:
+#        continue
+#  
+##df['varsity'] = 0
+##df['TFA'] = 0
+##df['PeaceCorps'] = 0
+##df['Rhodes'] = 0
+##df['Fulbright'] = 0
+#
+#df['Extra'] = 0
+#
+#for i in df.index:
+#    amp = df['amp_id'][i]
+#    if amp in varsity_list:
+#        df['Extra'][i] = 1
+#    elif amp in TFA_list:
+#        df['Extra'][i] = 1
+#    elif amp in PeaceCorps_list:
+#        df['Extra'][i] = 1
+#    elif amp in Rhodes_list:
+#        df['Extra'][i] = 1
+#    elif amp in Fulbright_list:
+#        df['Extra'][i] = 1
+#    else: 
+#        continue
+
+# get highest MCAT percentile
+df['MCAT_max'] = scores_data[['MCAT1_TOTAL_PERCENTILE','MCAT2_TOTAL_PERCENTILE', 'MCAT1_1991_TOTAL_PERCENTILE', 'MCAT2_1991_TOTAL_PERCENTILE']].max(axis =1)
+
+# Socioeconomic indicators
+#df['Socio_Ind'] = scores_data['Pell Grant'].apply(lambda x: 1 if x == "Yes" else 0)
+#
+#def Fee(x):
+#    if "Y" in x:
+#        return 1
+#    
+#df['Socio_Ind'] = scores_data['Fee Assistance'].apply(Fee)
+
+#def Socio(x):
+#    if 'EO1' == x:
+#        return 2
+#    elif 'EO2' == x:
+#        return 3
+ 
+
+scores_data['Pell Grant'].fillna(' ', inplace=True)
+scores_data['Fee Assistance'].fillna(' ', inplace=True)
+   
+df['Socio_Ind'] = 0  
+for i in df.index:
+    if 'EO1' == scores_data['Socioeconomic Indicator'][i]:
+        df['Socio_Ind'][i] = 2
+    elif 'EO2' == scores_data['Socioeconomic Indicator'][i]:
+        df['Socio_Ind'][i] = 3
+    else:
+        if 'Y' in  scores_data['Pell Grant'][i]:
+            df['Socio_Ind'][i] = 1
+        elif 'Y' in scores_data['Fee Assistance'][i]:
+            df['Socio_Ind'][i] = 1
+        else:
+            continue
+    
+#df['Socio_Ind'] = scores_data['Socioeconomic Indicator'].apply(Socio)
+# military service
+df['Military'] = scores_data['Military Service'].apply(lambda x: 1 if x == "Y" else 0)
+# first generation
+df['First_Gen'] = scores_data['First Generation'].apply(lambda x: 1 if x == "Yes" else 0)
+#print(df['First_Gen'].value_counts())
+#df['Born_NY'] = scores_data['Birthplace'].apply(lambda x: 1 if "NY" in x else 0)
+#df['Residence_NY'] = scores_data['Legal Residence'].apply(lambda x: 1 if "New York" in str(x) else 0)
+#df['Primary_State_NY'] = scores_data['Primary Childhood State'].apply(lambda x: 1 if "New York" in str(x) else 0)
+#df['Disadvantaged'] = scores_data['Disadvantaged'].apply(lambda x: 1 if x == "Y" else 0)
+#df['Fee Assistance'] = scores_data['Fee Assistance'].apply(lambda x: 1 if x == "Y" else 0)
+#df['Underserved'] = scores_data['Underserved (Self-Reported)'].apply(lambda x: 1 if x == "Yes" else 0)
+#df['Family_income_bottom'] = scores_data['Family Income Level'].apply(lambda x: 1 if x == "Less than $25,000" else 0)
+#df['Family_income_low'] = scores_data['Family Income Level'].apply(lambda x: 1 if x == "$25,000 - 49,999" else 0)
+#df['Family_Assistance'] = scores_data['Family Assistance Program'].apply(lambda x: 1 if x == "Yes" else 0)
+#df['Family_contribution'] = scores_data['Contribution to Family'].apply(lambda x: 1 if x == "Yes" else 0)
+
+###########################
+# RACIAL/ETHNIC CATEGORIES
+
+# African American
+scores_data['AA'] = 0
+for i in scores_data.index:
+    if 'Black' in str(scores_data['Racial Self-Description'][i]):
+        scores_data['AA'][i] = 1
+    else:
+        scores_data['AA'][i] = 0
+        
+df['AA'] = scores_data['AA']
+
+# Latino
+scores_data['Latino'] = 0
+for i in scores_data.index:
+    if 'Yes' in str(scores_data['Spanish, Hispanic, Latino/Latina'][i]):
+        scores_data['Latino'][i] = 1
+    else:
+        scores_data['Latino'][i] = 0
+        
+df['Latino'] = scores_data['Latino']
+
+# Native American 
+scores_data['NativeAmerican'] = 0
+for i in scores_data.index:
+    if 'American Indian' in str(scores_data['Racial Self-Description'][i]):
+        scores_data['NativeAmerican'][i] = 1
+    elif 'Cherokee' in str(scores_data['Racial Self-Description'][i]):
+        scores_data['NativeAmerican'][i] = 1
+    else:
+        scores_data['NativeAmerican'][i] = 0
+        
+df['NativeAmerican'] = scores_data['NativeAmerican']
+
+# Citizenship
+scores_data['Citizen'] = 0
+for i in scores_data.index:
+    if 'United States' in str(scores_data['Citizenship'][i]):
+        scores_data['Citizen'][i] = 1
+    else:
+        scores_data['Citizen'][i] = 0
+        
+df['Citizen'] = scores_data['Citizen']
+###########################
+
+print('Made categories for race/ethnicity')
+
+###########################
+# GPA WEIGHTING BY SCHOOL
+"""
+These series of steps process the school names by:
+    1. removing dashes and changing to lower case
+    2. stripping off any spaces
+    3. matching them to a dictionary of schools and getting the associated multiplier
+    4. multiply the total and BCPM GPAs by the school weight
+
+"""
+# process the school names 
+for i in schools.index:
+    college_string = str(schools['School'][i])
+    college_string_split = college_string.split('-')[0]
+    college_string_split = college_string_split.split('—')[0]
+    college_string_strip = college_string_split.strip().lower()
+    schools['School'][i] = college_string_strip
+
+
+for i in scores_data.index:
+    college_string = str(scores_data['Undergraduate College'][i])
+    college_string_split = college_string.split('-')[0]
+    college_string_split = college_string_split.split('—')[0]
+    college_string_strip = college_string_split.strip().lower()
+    scores_data['Undergraduate College'][i] = college_string_strip
+    
+list_of_names = schools['School'].to_list()
+school_dict = dict(zip(schools['School'], schools['Multiplier']))
+
+# matches the school name to the dictionary
+scores_data['Undergrad'] = float('NaN')
+for i in scores_data.index:
+    school_key = scores_data['Undergraduate College'][i]
+    for key, value in school_dict.items():
+        if school_key in key:
+            scores_data['Undergrad'][i] = value
+            break
+        elif school_key in "columbia university in the city of new york":
+            scores_data['Undergrad'][i] = 1.07
+            break
+        else:
+            scores_data['Undergrad'][i] = 1.00
+            
+
+# calculate weighted GPAs
+scores_data['ADJ_BCPM_GPA'] = scores_data['CUM_BCPM_GPA'] * scores_data['Undergrad']
+df['ADJ_BCPM_GPA'] = scores_data['ADJ_BCPM_GPA']
+scores_data['ADJ_TOTAL_GPA'] = scores_data['CUM_TOTAL_GPA'] * scores_data['Undergrad']
+df['ADJ_TOTAL_GPA'] = scores_data['ADJ_TOTAL_GPA']
+
+print('Calculated weighted GPA')
+## unweighted GPA
+df['raw_BCPM_GPA'] = scores_data['CUM_BCPM_GPA']
+df['raw_TOTAL_GPA'] = scores_data['CUM_TOTAL_GPA']
+df['Undergrad_Multiplier'] = scores_data['Undergrad']
+###########################
+
+# Institutional Action/Felony/Misdemeanor
+scores_data['Institutional_Action'] = scores_data['Institutional Action'].apply(lambda x: 0 if x == "Yes" else 1)
+df['Institutional_Action'] = scores_data['Institutional_Action']
+#scores_data['Felon'] = scores_data['Felony'].apply(lambda x: 0 if x == "Yes" else 1)
+##df['Felon'] = scores_data['Felon']
+#scores_data['Misd'] = scores_data['Misdemeanor'].apply(lambda x: 0 if x == "Yes" else 1)
+#df['Misd'] = scores_data['Misd']
+# Screening date
+df['screening_complete_days'] = scores_data.apply(lambda x: 365 if type(x['screening_complete_date']) is not str else
+        (
+            datetime.strptime(x['screening_complete_date'], '%m/%d/%Y %H:%M').date() -
+            datetime(x['App Year'] - 1, 7, 1).date() # subtract screening_complete_date from season start, July 1st of preceding year    
+        ).days,
+        axis=1)
+for value in df['screening_complete_days'].unique(): # check for invalid output values
+    if value > 365:
+        print(f'Error: Invalid value {value} in screening_complete_days')  
+
+# VIP Status
+scores_data['VIP'] = float('NaN')
+for i in scores_data.index:
+    if 'Yes' in str(scores_data['VIP'][i]):
+        scores_data['VIP'][i] = 1
+    else:
+        scores_data['VIP'][i] = 0
+        
+df['VIP'] = scores_data['VIP']        
+        
+scores_data['Supplement1'] = float('NaN')
+for i in scores_data.index:
+    if 'Yes' in str(scores_data['Supp 1'][i]):
+        scores_data['Supplement1'][i] = 1
+    else:
+        scores_data['Supplement1'][i] = 0    
+        
+df['Supplement1'] = scores_data['Supplement1'] 
+
+df['Interview_Decision'] = scores_data['Status']
+scores_data['Interview'] = scores_data['Status'].apply(lambda x: 0 if x == "Denied Before Interview" else 1)
+df['Interview'] = scores_data['Interview']
+scores_data['Interview'] = scores_data['Invited for interview']
+df['Interview'] = scores_data['Interview']
+
+print('Coded the interview decisions. Just putting on the finishing touches...')
+
+# write to CSV
+today = str(datetime.today()).split()[0]
+df.to_csv(f'Preprocessed_{today}.csv')
